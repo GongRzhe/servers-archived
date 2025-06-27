@@ -11,7 +11,7 @@ import fetch from 'node-fetch';
 
 import * as repository from './operations/repository.js';
 import * as files from './operations/files.js';
-import *s issues from './operations/issues.js';
+import * as issues from './operations/issues.js';
 import * as pulls from './operations/pulls.js';
 import * as branches from './operations/branches.js';
 import * as search from './operations/search.js';
@@ -218,7 +218,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     const { GITHUB_PERSONAL_ACCESS_TOKEN, ...args } = request.params.arguments;
 
-    return await authStorage.run({ token: GITHUB_PERSONAL_ACCESS_TOKEN }, async () => {
+    const token = typeof GITHUB_PERSONAL_ACCESS_TOKEN === 'string' ? GITHUB_PERSONAL_ACCESS_TOKEN : undefined;
+
+    return await authStorage.run({ token }, async () => {
         switch (request.params.name) {
         case "fork_repository": {
             const parsedArgs = repository.ForkRepositorySchema.parse(args);
