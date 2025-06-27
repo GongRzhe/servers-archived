@@ -13,9 +13,56 @@ MCP Server for the GitHub API, enabling file operations, repository management, 
 - **Git History Preservation**: Operations maintain proper Git history without force pushing
 - **Batch Operations**: Support for both single-file and multi-file operations
 - **Advanced Search**: Support for searching code, issues/PRs, and users
+- **Multi-User Support**: Each tool call can be authenticated with a different GitHub Personal Access Token, allowing for concurrent use by multiple users.
 
+## Authentication
+
+This server supports two methods of authentication:
+
+1.  **Environment Variable (Single-User)**: You can set the `GITHUB_PERSONAL_ACCESS_TOKEN` environment variable when running the server. This token will be used for all operations.
+
+2.  **Per-Tool Authentication (Multi-User)**: For multi-user environments, you can pass a `GITHUB_PERSONAL_ACCESS_TOKEN` as a parameter to any tool call. This token will be used for that specific operation, overriding the environment variable if it is set.
+
+This is made possible by using Node.js's `AsyncLocalStorage` API, which creates a unique, isolated context for each request. This ensures that even with many concurrent users, each user's token is used only for their own operations, with no risk of data leakage.
+
+### How to Use for Multi-User Scenarios
+
+To use this feature, simply include the `GITHUB_PERSONAL_ACCESS_TOKEN` parameter in the arguments of your tool call. For example:
+
+```json
+{
+  "tool_name": "create_repository",
+  "arguments": {
+    "name": "my-new-repo",
+    "description": "A repository for my project",
+    "private": true,
+    "GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_YourUserSpecificTokenHere"
+  }
+}
+```
+
+If a tool is called without this parameter, the server will fall back to using the token from the `GITHUB_PERSONAL_ACCESS_TOKEN` environment variable.
+
+## Architectural Design: `AsyncLocalStorage`
+
+The multi-user authentication in this server is built using Node.js's `AsyncLocalStorage` API. This design was chosen for its robustness, maintainability, and safety in concurrent environments.
+
+### Comparison with Alternative Approaches
+
+An alternative to `AsyncLocalStorage` is "prop-drilling," which involves passing the token as a parameter through every function in the call stack. The table below compares the two approaches:
+
+| Criterion | Prop-Drilling Approach | `AsyncLocalStorage` Approach |
+| :--- | :--- | :--- |
+| **Code Changes** | **High.** Required modifying every file in `operations/`, plus `utils.ts` and `index.ts`. | **Low.** Only required changes in `index.ts`, `utils.ts`, and the creation of one new context file. `operations/` files were untouched. |
+| **Maintainability** | **Poor.** Adding a new tool would require remembering to add the token parameter to its schema and function signature, which is error-prone. | **Excellent.** New tools work automatically without any special consideration for authentication. The logic is centralized. |
+| **Readability** | **Cluttered.** Function signatures were filled with a `token` parameter that was irrelevant to their core business logic, making them noisy. | **Clean.** The functions in `operations/` are clean and focused only on their specific task (e.g., creating an issue). |
+| **Concurrency Safety** | **Manually Safe.** It was safe from race conditions, but only because we manually passed the correct token for each request. This relies on developer discipline. | **Inherently Safe.** The entire pattern is designed for concurrency. Node.js guarantees that each request's context is isolated, eliminating the possibility of race conditions. |
+
+While prop-drilling is more explicit, `AsyncLocalStorage` provides a superior architecture that is cleaner, more scalable, and less prone to developer error. It is the modern, standard way to handle request-scoped context in Node.js.
 
 ## Tools
+
+All tools accept an optional `GITHUB_PERSONAL_ACCESS_TOKEN` parameter in addition to their specific arguments.
 
 1. `create_or_update_file`
    - Create or update a single file in a repository
