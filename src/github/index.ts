@@ -7,7 +7,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
-import fetch, { Request, Response } from 'node-fetch';
+import fetch from 'node-fetch';
 
 import * as repository from './operations/repository.js';
 import * as files from './operations/files.js';
@@ -214,7 +214,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     switch (request.params.name) {
       case "fork_repository": {
         const args = repository.ForkRepositorySchema.parse(request.params.arguments);
-        const fork = await repository.forkRepository(args.owner, args.repo, args.organization);
+        const { owner, repo, organization, GITHUB_PERSONAL_ACCESS_TOKEN } = args;
+        const fork = await repository.forkRepository(owner, repo, organization, GITHUB_PERSONAL_ACCESS_TOKEN);
         return {
           content: [{ type: "text", text: JSON.stringify(fork, null, 2) }],
         };
@@ -222,23 +223,27 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "create_branch": {
         const args = branches.CreateBranchSchema.parse(request.params.arguments);
-        const branch = await branches.createBranchFromRef(
-          args.owner,
-          args.repo,
-          args.branch,
-          args.from_branch
+        const { owner, repo, branch, from_branch, GITHUB_PERSONAL_ACCESS_TOKEN } = args;
+        const branchResult = await branches.createBranchFromRef(
+          owner,
+          repo,
+          branch,
+          from_branch,
+          GITHUB_PERSONAL_ACCESS_TOKEN
         );
         return {
-          content: [{ type: "text", text: JSON.stringify(branch, null, 2) }],
+          content: [{ type: "text", text: JSON.stringify(branchResult, null, 2) }],
         };
       }
 
       case "search_repositories": {
         const args = repository.SearchRepositoriesSchema.parse(request.params.arguments);
+        const { query, page, perPage, GITHUB_PERSONAL_ACCESS_TOKEN } = args;
         const results = await repository.searchRepositories(
-          args.query,
-          args.page,
-          args.perPage
+          query,
+          page,
+          perPage,
+          GITHUB_PERSONAL_ACCESS_TOKEN
         );
         return {
           content: [{ type: "text", text: JSON.stringify(results, null, 2) }],
@@ -255,11 +260,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "get_file_contents": {
         const args = files.GetFileContentsSchema.parse(request.params.arguments);
+        const { owner, repo, path, branch, GITHUB_PERSONAL_ACCESS_TOKEN } = args;
         const contents = await files.getFileContents(
-          args.owner,
-          args.repo,
-          args.path,
-          args.branch
+          owner,
+          repo,
+          path,
+          branch,
+          GITHUB_PERSONAL_ACCESS_TOKEN
         );
         return {
           content: [{ type: "text", text: JSON.stringify(contents, null, 2) }],
@@ -268,14 +275,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "create_or_update_file": {
         const args = files.CreateOrUpdateFileSchema.parse(request.params.arguments);
+        const { owner, repo, path, content, message, branch, sha, GITHUB_PERSONAL_ACCESS_TOKEN } = args;
         const result = await files.createOrUpdateFile(
-          args.owner,
-          args.repo,
-          args.path,
-          args.content,
-          args.message,
-          args.branch,
-          args.sha
+          owner,
+          repo,
+          path,
+          content,
+          message,
+          branch,
+          sha,
+          GITHUB_PERSONAL_ACCESS_TOKEN
         );
         return {
           content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
@@ -284,12 +293,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "push_files": {
         const args = files.PushFilesSchema.parse(request.params.arguments);
+        const { owner, repo, branch, files: filesToPush, message, GITHUB_PERSONAL_ACCESS_TOKEN } = args;
         const result = await files.pushFiles(
-          args.owner,
-          args.repo,
-          args.branch,
-          args.files,
-          args.message
+          owner,
+          repo,
+          branch,
+          filesToPush,
+          message,
+          GITHUB_PERSONAL_ACCESS_TOKEN
         );
         return {
           content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
@@ -298,13 +309,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "create_issue": {
         const args = issues.CreateIssueSchema.parse(request.params.arguments);
-        const { owner, repo, ...options } = args;
+        const { owner, repo, GITHUB_PERSONAL_ACCESS_TOKEN, ...options } = args;
         
         try {
           console.error(`[DEBUG] Attempting to create issue in ${owner}/${repo}`);
           console.error(`[DEBUG] Issue options:`, JSON.stringify(options, null, 2));
           
-          const issue = await issues.createIssue(owner, repo, options);
+          const issue = await issues.createIssue(owner, repo, options, GITHUB_PERSONAL_ACCESS_TOKEN);
           
           console.error(`[DEBUG] Issue created successfully`);
           return {
@@ -327,9 +338,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           
           // Safely access error properties
           throw new Error(
-            `Failed to create issue: ${error.message}${
-              error.stack ? `\nStack: ${error.stack}` : ''
-            }`
+            `Failed to create issue: ${error.message}${error.stack ? `\nStack: ${error.stack}` : ''}`
           );
         }
       }
@@ -368,8 +377,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "list_issues": {
         const args = issues.ListIssuesOptionsSchema.parse(request.params.arguments);
-        const { owner, repo, ...options } = args;
-        const result = await issues.listIssues(owner, repo, options);
+        const { owner, repo, GITHUB_PERSONAL_ACCESS_TOKEN, ...options } = args;
+        const result = await issues.listIssues(owner, repo, options, GITHUB_PERSONAL_ACCESS_TOKEN);
         return {
           content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
         };
@@ -377,8 +386,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "update_issue": {
         const args = issues.UpdateIssueOptionsSchema.parse(request.params.arguments);
-        const { owner, repo, issue_number, ...options } = args;
-        const result = await issues.updateIssue(owner, repo, issue_number, options);
+        const { owner, repo, issue_number, GITHUB_PERSONAL_ACCESS_TOKEN, ...options } = args;
+        const result = await issues.updateIssue(owner, repo, issue_number, options, GITHUB_PERSONAL_ACCESS_TOKEN);
         return {
           content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
         };
@@ -386,8 +395,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "add_issue_comment": {
         const args = issues.IssueCommentSchema.parse(request.params.arguments);
-        const { owner, repo, issue_number, body } = args;
-        const result = await issues.addIssueComment(owner, repo, issue_number, body);
+        const { owner, repo, issue_number, body, GITHUB_PERSONAL_ACCESS_TOKEN } = args;
+        const result = await issues.addIssueComment(owner, repo, issue_number, body, GITHUB_PERSONAL_ACCESS_TOKEN);
         return {
           content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
         };
@@ -395,12 +404,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "list_commits": {
         const args = commits.ListCommitsSchema.parse(request.params.arguments);
+        const { owner, repo, page, perPage, sha, GITHUB_PERSONAL_ACCESS_TOKEN } = args;
         const results = await commits.listCommits(
-          args.owner,
-          args.repo,
-          args.page,
-          args.perPage,
-          args.sha
+          owner,
+          repo,
+          page,
+          perPage,
+          sha,
+          GITHUB_PERSONAL_ACCESS_TOKEN
         );
         return {
           content: [{ type: "text", text: JSON.stringify(results, null, 2) }],
@@ -409,7 +420,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "get_issue": {
         const args = issues.GetIssueSchema.parse(request.params.arguments);
-        const issue = await issues.getIssue(args.owner, args.repo, args.issue_number);
+        const { owner, repo, issue_number, GITHUB_PERSONAL_ACCESS_TOKEN } = args;
+        const issue = await issues.getIssue(owner, repo, issue_number, GITHUB_PERSONAL_ACCESS_TOKEN);
         return {
           content: [{ type: "text", text: JSON.stringify(issue, null, 2) }],
         };
@@ -417,7 +429,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "get_pull_request": {
         const args = pulls.GetPullRequestSchema.parse(request.params.arguments);
-        const pullRequest = await pulls.getPullRequest(args.owner, args.repo, args.pull_number);
+        const { owner, repo, pull_number, GITHUB_PERSONAL_ACCESS_TOKEN } = args;
+        const pullRequest = await pulls.getPullRequest(owner, repo, pull_number, GITHUB_PERSONAL_ACCESS_TOKEN);
         return {
           content: [{ type: "text", text: JSON.stringify(pullRequest, null, 2) }],
         };
@@ -425,8 +438,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "list_pull_requests": {
         const args = pulls.ListPullRequestsSchema.parse(request.params.arguments);
-        const { owner, repo, ...options } = args;
-        const pullRequests = await pulls.listPullRequests(owner, repo, options);
+        const { owner, repo, GITHUB_PERSONAL_ACCESS_TOKEN, ...options } = args;
+        const pullRequests = await pulls.listPullRequests(owner, repo, options, GITHUB_PERSONAL_ACCESS_TOKEN);
         return {
           content: [{ type: "text", text: JSON.stringify(pullRequests, null, 2) }],
         };
@@ -434,8 +447,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "create_pull_request_review": {
         const args = pulls.CreatePullRequestReviewSchema.parse(request.params.arguments);
-        const { owner, repo, pull_number, ...options } = args;
-        const review = await pulls.createPullRequestReview(owner, repo, pull_number, options);
+        const { owner, repo, pull_number, GITHUB_PERSONAL_ACCESS_TOKEN, ...options } = args;
+        const review = await pulls.createPullRequestReview(owner, repo, pull_number, options, GITHUB_PERSONAL_ACCESS_TOKEN);
         return {
           content: [{ type: "text", text: JSON.stringify(review, null, 2) }],
         };
@@ -443,8 +456,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "merge_pull_request": {
         const args = pulls.MergePullRequestSchema.parse(request.params.arguments);
-        const { owner, repo, pull_number, ...options } = args;
-        const result = await pulls.mergePullRequest(owner, repo, pull_number, options);
+        const { owner, repo, pull_number, GITHUB_PERSONAL_ACCESS_TOKEN, ...options } = args;
+        const result = await pulls.mergePullRequest(owner, repo, pull_number, options, GITHUB_PERSONAL_ACCESS_TOKEN);
         return {
           content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
         };
@@ -452,15 +465,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "get_pull_request_files": {
         const args = pulls.GetPullRequestFilesSchema.parse(request.params.arguments);
-        const files = await pulls.getPullRequestFiles(args.owner, args.repo, args.pull_number);
+        const { owner, repo, pull_number, GITHUB_PERSONAL_ACCESS_TOKEN } = args;
+        const filesResult = await pulls.getPullRequestFiles(owner, repo, pull_number, GITHUB_PERSONAL_ACCESS_TOKEN);
         return {
-          content: [{ type: "text", text: JSON.stringify(files, null, 2) }],
+          content: [{ type: "text", text: JSON.stringify(filesResult, null, 2) }],
         };
       }
 
       case "get_pull_request_status": {
         const args = pulls.GetPullRequestStatusSchema.parse(request.params.arguments);
-        const status = await pulls.getPullRequestStatus(args.owner, args.repo, args.pull_number);
+        const { owner, repo, pull_number, GITHUB_PERSONAL_ACCESS_TOKEN } = args;
+        const status = await pulls.getPullRequestStatus(owner, repo, pull_number, GITHUB_PERSONAL_ACCESS_TOKEN);
         return {
           content: [{ type: "text", text: JSON.stringify(status, null, 2) }],
         };
@@ -468,8 +483,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "update_pull_request_branch": {
         const args = pulls.UpdatePullRequestBranchSchema.parse(request.params.arguments);
-        const { owner, repo, pull_number, expected_head_sha } = args;
-        await pulls.updatePullRequestBranch(owner, repo, pull_number, expected_head_sha);
+        const { owner, repo, pull_number, expected_head_sha, GITHUB_PERSONAL_ACCESS_TOKEN } = args;
+        await pulls.updatePullRequestBranch(owner, repo, pull_number, expected_head_sha, GITHUB_PERSONAL_ACCESS_TOKEN);
         return {
           content: [{ type: "text", text: JSON.stringify({ success: true }, null, 2) }],
         };
@@ -477,7 +492,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "get_pull_request_comments": {
         const args = pulls.GetPullRequestCommentsSchema.parse(request.params.arguments);
-        const comments = await pulls.getPullRequestComments(args.owner, args.repo, args.pull_number);
+        const { owner, repo, pull_number, GITHUB_PERSONAL_ACCESS_TOKEN } = args;
+        const comments = await pulls.getPullRequestComments(owner, repo, pull_number, GITHUB_PERSONAL_ACCESS_TOKEN);
         return {
           content: [{ type: "text", text: JSON.stringify(comments, null, 2) }],
         };
@@ -485,7 +501,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "get_pull_request_reviews": {
         const args = pulls.GetPullRequestReviewsSchema.parse(request.params.arguments);
-        const reviews = await pulls.getPullRequestReviews(args.owner, args.repo, args.pull_number);
+        const { owner, repo, pull_number, GITHUB_PERSONAL_ACCESS_TOKEN } = args;
+        const reviews = await pulls.getPullRequestReviews(owner, repo, pull_number, GITHUB_PERSONAL_ACCESS_TOKEN);
         return {
           content: [{ type: "text", text: JSON.stringify(reviews, null, 2) }],
         };

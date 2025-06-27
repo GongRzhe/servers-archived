@@ -84,13 +84,15 @@ export const CreatePullRequestSchema = z.object({
   head: z.string().describe("The name of the branch where your changes are implemented"),
   base: z.string().describe("The name of the branch you want the changes pulled into"),
   draft: z.boolean().optional().describe("Whether to create the pull request as a draft"),
-  maintainer_can_modify: z.boolean().optional().describe("Whether maintainers can modify the pull request")
+  maintainer_can_modify: z.boolean().optional().describe("Whether maintainers can modify the pull request"),
+  GITHUB_PERSONAL_ACCESS_TOKEN: z.string().optional().describe("GitHub Personal Access Token"),
 });
 
 export const GetPullRequestSchema = z.object({
   owner: z.string().describe("Repository owner (username or organization)"),
   repo: z.string().describe("Repository name"),
-  pull_number: z.number().describe("Pull request number")
+  pull_number: z.number().describe("Pull request number"),
+  GITHUB_PERSONAL_ACCESS_TOKEN: z.string().optional().describe("GitHub Personal Access Token"),
 });
 
 export const ListPullRequestsSchema = z.object({
@@ -102,7 +104,8 @@ export const ListPullRequestsSchema = z.object({
   sort: z.enum(['created', 'updated', 'popularity', 'long-running']).optional().describe("What to sort results by"),
   direction: z.enum(['asc', 'desc']).optional().describe("The direction of the sort"),
   per_page: z.number().optional().describe("Results per page (max 100)"),
-  page: z.number().optional().describe("Page number of the results")
+  page: z.number().optional().describe("Page number of the results"),
+  GITHUB_PERSONAL_ACCESS_TOKEN: z.string().optional().describe("GitHub Personal Access Token"),
 });
 
 export const CreatePullRequestReviewSchema = z.object({
@@ -125,7 +128,8 @@ export const CreatePullRequestReviewSchema = z.object({
         body: z.string().describe("Text of the review comment")
       })
     ])
-  ).optional().describe("Comments to post as part of the review (specify either position or line, not both)")
+  ).optional().describe("Comments to post as part of the review (specify either position or line, not both)"),
+  GITHUB_PERSONAL_ACCESS_TOKEN: z.string().optional().describe("GitHub Personal Access Token"),
 });
 
 export const MergePullRequestSchema = z.object({
@@ -134,52 +138,59 @@ export const MergePullRequestSchema = z.object({
   pull_number: z.number().describe("Pull request number"),
   commit_title: z.string().optional().describe("Title for the automatic commit message"),
   commit_message: z.string().optional().describe("Extra detail to append to automatic commit message"),
-  merge_method: z.enum(['merge', 'squash', 'rebase']).optional().describe("Merge method to use")
+  merge_method: z.enum(['merge', 'squash', 'rebase']).optional().describe("Merge method to use"),
+  GITHUB_PERSONAL_ACCESS_TOKEN: z.string().optional().describe("GitHub Personal Access Token"),
 });
 
 export const GetPullRequestFilesSchema = z.object({
   owner: z.string().describe("Repository owner (username or organization)"),
   repo: z.string().describe("Repository name"), 
-  pull_number: z.number().describe("Pull request number")
+  pull_number: z.number().describe("Pull request number"),
+  GITHUB_PERSONAL_ACCESS_TOKEN: z.string().optional().describe("GitHub Personal Access Token"),
 });
 
 export const GetPullRequestStatusSchema = z.object({
   owner: z.string().describe("Repository owner (username or organization)"),
   repo: z.string().describe("Repository name"),
-  pull_number: z.number().describe("Pull request number")
+  pull_number: z.number().describe("Pull request number"),
+  GITHUB_PERSONAL_ACCESS_TOKEN: z.string().optional().describe("GitHub Personal Access Token"),
 });
 
 export const UpdatePullRequestBranchSchema = z.object({
   owner: z.string().describe("Repository owner (username or organization)"),
   repo: z.string().describe("Repository name"),
   pull_number: z.number().describe("Pull request number"),
-  expected_head_sha: z.string().optional().describe("The expected SHA of the pull request's HEAD ref")
+  expected_head_sha: z.string().optional().describe("The expected SHA of the pull request's HEAD ref"),
+  GITHUB_PERSONAL_ACCESS_TOKEN: z.string().optional().describe("GitHub Personal Access Token"),
 });
 
 export const GetPullRequestCommentsSchema = z.object({
   owner: z.string().describe("Repository owner (username or organization)"),
   repo: z.string().describe("Repository name"),
-  pull_number: z.number().describe("Pull request number")
+  pull_number: z.number().describe("Pull request number"),
+  GITHUB_PERSONAL_ACCESS_TOKEN: z.string().optional().describe("GitHub Personal Access Token"),
 });
 
 export const GetPullRequestReviewsSchema = z.object({
   owner: z.string().describe("Repository owner (username or organization)"),
   repo: z.string().describe("Repository name"),
-  pull_number: z.number().describe("Pull request number")
+  pull_number: z.number().describe("Pull request number"),
+  GITHUB_PERSONAL_ACCESS_TOKEN: z.string().optional().describe("GitHub Personal Access Token"),
 });
 
 // Function implementations
 export async function createPullRequest(
   params: z.infer<typeof CreatePullRequestSchema>
 ): Promise<z.infer<typeof GitHubPullRequestSchema>> {
-  const { owner, repo, ...options } = CreatePullRequestSchema.parse(params);
+  const { owner, repo, GITHUB_PERSONAL_ACCESS_TOKEN, ...options } = CreatePullRequestSchema.parse(params);
 
   const response = await githubRequest(
     `https://api.github.com/repos/${owner}/${repo}/pulls`,
     {
       method: "POST",
       body: options,
-    }
+    },
+    GITHUB_PERSONAL_ACCESS_TOKEN,
   );
 
   return GitHubPullRequestSchema.parse(response);
@@ -188,10 +199,13 @@ export async function createPullRequest(
 export async function getPullRequest(
   owner: string,
   repo: string,
-  pullNumber: number
+  pullNumber: number,
+  token?: string,
 ): Promise<z.infer<typeof GitHubPullRequestSchema>> {
   const response = await githubRequest(
-    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}`
+    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}`,
+    {},
+    token,
   );
   return GitHubPullRequestSchema.parse(response);
 }
@@ -199,7 +213,8 @@ export async function getPullRequest(
 export async function listPullRequests(
   owner: string,
   repo: string,
-  options: Omit<z.infer<typeof ListPullRequestsSchema>, 'owner' | 'repo'>
+  options: Omit<z.infer<typeof ListPullRequestsSchema>, 'owner' | 'repo' | 'GITHUB_PERSONAL_ACCESS_TOKEN'>,
+  token?: string,
 ): Promise<z.infer<typeof GitHubPullRequestSchema>[]> {
   const url = new URL(`https://api.github.com/repos/${owner}/${repo}/pulls`);
   
@@ -211,7 +226,7 @@ export async function listPullRequests(
   if (options.per_page) url.searchParams.append('per_page', options.per_page.toString());
   if (options.page) url.searchParams.append('page', options.page.toString());
 
-  const response = await githubRequest(url.toString());
+  const response = await githubRequest(url.toString(), {}, token);
   return z.array(GitHubPullRequestSchema).parse(response);
 }
 
@@ -219,14 +234,16 @@ export async function createPullRequestReview(
   owner: string,
   repo: string,
   pullNumber: number,
-  options: Omit<z.infer<typeof CreatePullRequestReviewSchema>, 'owner' | 'repo' | 'pull_number'>
+  options: Omit<z.infer<typeof CreatePullRequestReviewSchema>, 'owner' | 'repo' | 'pull_number' | 'GITHUB_PERSONAL_ACCESS_TOKEN'>,
+  token?: string,
 ): Promise<z.infer<typeof PullRequestReviewSchema>> {
   const response = await githubRequest(
     `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`,
     {
       method: 'POST',
       body: options,
-    }
+    },
+    token,
   );
   return PullRequestReviewSchema.parse(response);
 }
@@ -235,24 +252,29 @@ export async function mergePullRequest(
   owner: string,
   repo: string,
   pullNumber: number,
-  options: Omit<z.infer<typeof MergePullRequestSchema>, 'owner' | 'repo' | 'pull_number'>
+  options: Omit<z.infer<typeof MergePullRequestSchema>, 'owner' | 'repo' | 'pull_number' | 'GITHUB_PERSONAL_ACCESS_TOKEN'>,
+  token?: string,
 ): Promise<any> {
   return githubRequest(
     `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/merge`,
     {
       method: 'PUT',
       body: options,
-    }
+    },
+    token,
   );
 }
 
 export async function getPullRequestFiles(
   owner: string,
   repo: string,
-  pullNumber: number
+  pullNumber: number,
+  token?: string,
 ): Promise<z.infer<typeof PullRequestFileSchema>[]> {
   const response = await githubRequest(
-    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/files`
+    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/files`,
+    {},
+    token,
   );
   return z.array(PullRequestFileSchema).parse(response);
 }
@@ -261,24 +283,29 @@ export async function updatePullRequestBranch(
   owner: string,
   repo: string,
   pullNumber: number,
-  expectedHeadSha?: string
+  expectedHeadSha?: string,
+  token?: string,
 ): Promise<void> {
   await githubRequest(
     `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/update-branch`,
     {
       method: "PUT",
       body: expectedHeadSha ? { expected_head_sha: expectedHeadSha } : undefined,
-    }
+    },
+    token,
   );
 }
 
 export async function getPullRequestComments(
   owner: string,
   repo: string,
-  pullNumber: number
+  pullNumber: number,
+  token?: string,
 ): Promise<z.infer<typeof PullRequestCommentSchema>[]> {
   const response = await githubRequest(
-    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/comments`
+    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/comments`,
+    {},
+    token,
   );
   return z.array(PullRequestCommentSchema).parse(response);
 }
@@ -286,10 +313,13 @@ export async function getPullRequestComments(
 export async function getPullRequestReviews(
   owner: string,
   repo: string,
-  pullNumber: number
+  pullNumber: number,
+  token?: string,
 ): Promise<z.infer<typeof PullRequestReviewSchema>[]> {
   const response = await githubRequest(
-    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`
+    `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`,
+    {},
+    token,
   );
   return z.array(PullRequestReviewSchema).parse(response);
 }
@@ -297,15 +327,18 @@ export async function getPullRequestReviews(
 export async function getPullRequestStatus(
   owner: string,
   repo: string,
-  pullNumber: number
+  pullNumber: number,
+  token?: string,
 ): Promise<z.infer<typeof CombinedStatusSchema>> {
   // First get the PR to get the head SHA
-  const pr = await getPullRequest(owner, repo, pullNumber);
+  const pr = await getPullRequest(owner, repo, pullNumber, token);
   const sha = pr.head.sha;
 
   // Then get the combined status for that SHA
   const response = await githubRequest(
-    `https://api.github.com/repos/${owner}/${repo}/commits/${sha}/status`
+    `https://api.github.com/repos/${owner}/${repo}/commits/${sha}/status`,
+    {},
+    token,
   );
   return CombinedStatusSchema.parse(response);
 }

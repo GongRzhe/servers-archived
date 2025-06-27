@@ -30,7 +30,8 @@ const USER_AGENT = `modelcontextprotocol/servers/github/v${VERSION} ${getUserAge
 
 export async function githubRequest(
   url: string,
-  options: RequestOptions = {}
+  options: RequestOptions = {},
+  token?: string,
 ): Promise<unknown> {
   const headers: Record<string, string> = {
     "Accept": "application/vnd.github.v3+json",
@@ -39,8 +40,9 @@ export async function githubRequest(
     ...options.headers,
   };
 
-  if (process.env.GITHUB_PERSONAL_ACCESS_TOKEN) {
-    headers["Authorization"] = `Bearer ${process.env.GITHUB_PERSONAL_ACCESS_TOKEN}`;
+  const authToken = token || process.env.GITHUB_PERSONAL_ACCESS_TOKEN;
+  if (authToken) {
+    headers["Authorization"] = `Bearer ${authToken}`;
   }
 
   const response = await fetch(url, {
@@ -66,7 +68,7 @@ export function validateBranchName(branch: string): string {
   if (sanitized.includes("..")) {
     throw new Error("Branch name cannot contain '..'");
   }
-  if (/[\s~^:?*[\\\]]/.test(sanitized)) {
+  if (/[\s~^:?*[\]]/.test(sanitized)) {
     throw new Error("Branch name contains invalid characters");
   }
   if (sanitized.startsWith("/") || sanitized.endsWith("/")) {
@@ -110,11 +112,14 @@ export function validateOwnerName(owner: string): string {
 export async function checkBranchExists(
   owner: string,
   repo: string,
-  branch: string
+  branch: string,
+  token?: string,
 ): Promise<boolean> {
   try {
     await githubRequest(
-      `https://api.github.com/repos/${owner}/${repo}/branches/${branch}`
+      `https://api.github.com/repos/${owner}/${repo}/branches/${branch}`,
+      {},
+      token,
     );
     return true;
   } catch (error) {
@@ -125,9 +130,9 @@ export async function checkBranchExists(
   }
 }
 
-export async function checkUserExists(username: string): Promise<boolean> {
+export async function checkUserExists(username: string, token?: string): Promise<boolean> {
   try {
-    await githubRequest(`https://api.github.com/users/${username}`);
+    await githubRequest(`https://api.github.com/users/${username}`, {}, token);
     return true;
   } catch (error) {
     if (error && typeof error === "object" && "status" in error && error.status === 404) {

@@ -23,6 +23,7 @@ export const CreateOrUpdateFileSchema = z.object({
   message: z.string().describe("Commit message"),
   branch: z.string().describe("Branch to create/update the file in"),
   sha: z.string().optional().describe("SHA of the file being replaced (required when updating existing files)"),
+  GITHUB_PERSONAL_ACCESS_TOKEN: z.string().optional().describe("GitHub Personal Access Token"),
 });
 
 export const GetFileContentsSchema = z.object({
@@ -30,6 +31,7 @@ export const GetFileContentsSchema = z.object({
   repo: z.string().describe("Repository name"),
   path: z.string().describe("Path to the file or directory"),
   branch: z.string().optional().describe("Branch to get contents from"),
+  GITHUB_PERSONAL_ACCESS_TOKEN: z.string().optional().describe("GitHub Personal Access Token"),
 });
 
 export const PushFilesSchema = z.object({
@@ -38,6 +40,7 @@ export const PushFilesSchema = z.object({
   branch: z.string().describe("Branch to push to (e.g., 'main' or 'master')"),
   files: z.array(FileOperationSchema).describe("Array of files to push"),
   message: z.string().describe("Commit message"),
+  GITHUB_PERSONAL_ACCESS_TOKEN: z.string().optional().describe("GitHub Personal Access Token"),
 });
 
 export const GitHubCreateUpdateFileResponseSchema = z.object({
@@ -73,14 +76,15 @@ export async function getFileContents(
   owner: string,
   repo: string,
   path: string,
-  branch?: string
+  branch?: string,
+  token?: string,
 ) {
   let url = `https://api.github.com/repos/${owner}/${repo}/contents/${path}`;
   if (branch) {
     url += `?ref=${branch}`;
   }
 
-  const response = await githubRequest(url);
+  const response = await githubRequest(url, {}, token);
   const data = GitHubContentSchema.parse(response);
 
   // If it's a file, decode the content
@@ -98,14 +102,15 @@ export async function createOrUpdateFile(
   content: string,
   message: string,
   branch: string,
-  sha?: string
+  sha?: string,
+  token?: string,
 ) {
   const encodedContent = Buffer.from(content).toString("base64");
 
   let currentSha = sha;
   if (!currentSha) {
     try {
-      const existingFile = await getFileContents(owner, repo, path, branch);
+      const existingFile = await getFileContents(owner, repo, path, branch, token);
       if (!Array.isArray(existingFile)) {
         currentSha = existingFile.sha;
       }
@@ -125,7 +130,7 @@ export async function createOrUpdateFile(
   const response = await githubRequest(url, {
     method: "PUT",
     body,
-  });
+  }, token);
 
   return GitHubCreateUpdateFileResponseSchema.parse(response);
 }
@@ -134,7 +139,8 @@ async function createTree(
   owner: string,
   repo: string,
   files: FileOperation[],
-  baseTree?: string
+  baseTree?: string,
+  token?: string,
 ) {
   const tree = files.map((file) => ({
     path: file.path,
@@ -151,7 +157,8 @@ async function createTree(
         tree,
         base_tree: baseTree,
       },
-    }
+    },
+    token,
   );
 
   return GitHubTreeSchema.parse(response);
@@ -162,7 +169,8 @@ async function createCommit(
   repo: string,
   message: string,
   tree: string,
-  parents: string[]
+  parents: string[],
+  token?: string,
 ) {
   const response = await githubRequest(
     `https://api.github.com/repos/${owner}/${repo}/git/commits`,
@@ -173,7 +181,8 @@ async function createCommit(
         tree,
         parents,
       },
-    }
+    },
+    token,
   );
 
   return GitHubCommitSchema.parse(response);
@@ -183,7 +192,8 @@ async function updateReference(
   owner: string,
   repo: string,
   ref: string,
-  sha: string
+  sha: string,
+  token?: string,
 ) {
   const response = await githubRequest(
     `https://api.github.com/repos/${owner}/${repo}/git/refs/${ref}`,
@@ -193,7 +203,8 @@ async function updateReference(
         sha,
         force: true,
       },
-    }
+    },
+    token,
   );
 
   return GitHubReferenceSchema.parse(response);
@@ -204,16 +215,19 @@ export async function pushFiles(
   repo: string,
   branch: string,
   files: FileOperation[],
-  message: string
+  message: string,
+  token?: string,
 ) {
   const refResponse = await githubRequest(
-    `https://api.github.com/repos/${owner}/${repo}/git/refs/heads/${branch}`
+    `https://api.github.com/repos/${owner}/${repo}/git/refs/heads/${branch}`,
+    {},
+    token,
   );
 
   const ref = GitHubReferenceSchema.parse(refResponse);
   const commitSha = ref.object.sha;
 
-  const tree = await createTree(owner, repo, files, commitSha);
-  const commit = await createCommit(owner, repo, message, tree.sha, [commitSha]);
-  return await updateReference(owner, repo, `heads/${branch}`, commit.sha);
+  const tree = await createTree(owner, repo, files, commitSha, token);
+  const commit = await createCommit(owner, repo, message, tree.sha, [commitSha], token);
+  return await updateReference(owner, repo, `heads/${branch}`, commit.sha, token);
 }

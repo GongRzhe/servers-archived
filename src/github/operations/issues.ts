@@ -5,6 +5,7 @@ export const GetIssueSchema = z.object({
   owner: z.string(),
   repo: z.string(),
   issue_number: z.number(),
+  GITHUB_PERSONAL_ACCESS_TOKEN: z.string().optional().describe("GitHub Personal Access Token"),
 });
 
 export const IssueCommentSchema = z.object({
@@ -12,6 +13,7 @@ export const IssueCommentSchema = z.object({
   repo: z.string(),
   issue_number: z.number(),
   body: z.string(),
+  GITHUB_PERSONAL_ACCESS_TOKEN: z.string().optional().describe("GitHub Personal Access Token"),
 });
 
 export const CreateIssueOptionsSchema = z.object({
@@ -26,6 +28,7 @@ export const CreateIssueSchema = z.object({
   owner: z.string(),
   repo: z.string(),
   ...CreateIssueOptionsSchema.shape,
+  GITHUB_PERSONAL_ACCESS_TOKEN: z.string().optional().describe("GitHub Personal Access Token"),
 });
 
 export const ListIssuesOptionsSchema = z.object({
@@ -38,6 +41,7 @@ export const ListIssuesOptionsSchema = z.object({
   since: z.string().optional(),
   sort: z.enum(["created", "updated", "comments"]).optional(),
   state: z.enum(["open", "closed", "all"]).optional(),
+  GITHUB_PERSONAL_ACCESS_TOKEN: z.string().optional().describe("GitHub Personal Access Token"),
 });
 
 export const UpdateIssueOptionsSchema = z.object({
@@ -50,42 +54,47 @@ export const UpdateIssueOptionsSchema = z.object({
   milestone: z.number().optional(),
   labels: z.array(z.string()).optional(),
   state: z.enum(["open", "closed"]).optional(),
+  GITHUB_PERSONAL_ACCESS_TOKEN: z.string().optional().describe("GitHub Personal Access Token"),
 });
 
-export async function getIssue(owner: string, repo: string, issue_number: number) {
-  return githubRequest(`https://api.github.com/repos/${owner}/${repo}/issues/${issue_number}`);
+export async function getIssue(owner: string, repo: string, issue_number: number, token?: string) {
+  return githubRequest(`https://api.github.com/repos/${owner}/${repo}/issues/${issue_number}`, {}, token);
 }
 
 export async function addIssueComment(
   owner: string,
   repo: string,
   issue_number: number,
-  body: string
+  body: string,
+  token?: string,
 ) {
   return githubRequest(`https://api.github.com/repos/${owner}/${repo}/issues/${issue_number}/comments`, {
     method: "POST",
     body: { body },
-  });
+  }, token);
 }
 
 export async function createIssue(
   owner: string,
   repo: string,
-  options: z.infer<typeof CreateIssueOptionsSchema>
+  options: z.infer<typeof CreateIssueOptionsSchema>,
+  token?: string,
 ) {
   return githubRequest(
     `https://api.github.com/repos/${owner}/${repo}/issues`,
     {
       method: "POST",
       body: options,
-    }
+    },
+    token,
   );
 }
 
 export async function listIssues(
   owner: string,
   repo: string,
-  options: Omit<z.infer<typeof ListIssuesOptionsSchema>, "owner" | "repo">
+  options: Omit<z.infer<typeof ListIssuesOptionsSchema>, "owner" | "repo" | "GITHUB_PERSONAL_ACCESS_TOKEN">,
+  token?: string,
 ) {
   const urlParams: Record<string, string | undefined> = {
     direction: options.direction,
@@ -98,7 +107,9 @@ export async function listIssues(
   };
 
   return githubRequest(
-    buildUrl(`https://api.github.com/repos/${owner}/${repo}/issues`, urlParams)
+    buildUrl(`https://api.github.com/repos/${owner}/${repo}/issues`, urlParams),
+    {},
+    token,
   );
 }
 
@@ -106,13 +117,15 @@ export async function updateIssue(
   owner: string,
   repo: string,
   issue_number: number,
-  options: Omit<z.infer<typeof UpdateIssueOptionsSchema>, "owner" | "repo" | "issue_number">
+  options: Omit<z.infer<typeof UpdateIssueOptionsSchema>, "owner" | "repo" | "issue_number" | "GITHUB_PERSONAL_ACCESS_TOKEN">,
+  token?: string,
 ) {
   return githubRequest(
     `https://api.github.com/repos/${owner}/${repo}/issues/${issue_number}`,
     {
       method: "PATCH",
       body: options,
-    }
+    },
+    token,
   );
 }
