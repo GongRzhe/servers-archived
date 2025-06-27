@@ -1,6 +1,7 @@
 import { getUserAgent } from "universal-user-agent";
 import { createGitHubError } from "./errors.js";
 import { VERSION } from "./version.js";
+import { authStorage } from "./context.js";
 
 type RequestOptions = {
   method?: string;
@@ -16,10 +17,10 @@ async function parseResponseBody(response: Response): Promise<unknown> {
   return response.text();
 }
 
-export function buildUrl(baseUrl: string, params: Record<string, string | number | undefined>): string {
+export function buildUrl(baseUrl: string, params: Record<string, any>): string {
   const url = new URL(baseUrl);
   Object.entries(params).forEach(([key, value]) => {
-    if (value !== undefined) {
+    if (value !== undefined && value !== null) {
       url.searchParams.append(key, value.toString());
     }
   });
@@ -30,9 +31,11 @@ const USER_AGENT = `modelcontextprotocol/servers/github/v${VERSION} ${getUserAge
 
 export async function githubRequest(
   url: string,
-  options: RequestOptions = {},
-  token?: string,
+  options: RequestOptions = {}
 ): Promise<unknown> {
+  const store = authStorage.getStore();
+  const token = store?.token;
+
   const headers: Record<string, string> = {
     "Accept": "application/vnd.github.v3+json",
     "Content-Type": "application/json",
@@ -112,14 +115,11 @@ export function validateOwnerName(owner: string): string {
 export async function checkBranchExists(
   owner: string,
   repo: string,
-  branch: string,
-  token?: string,
+  branch: string
 ): Promise<boolean> {
   try {
     await githubRequest(
-      `https://api.github.com/repos/${owner}/${repo}/branches/${branch}`,
-      {},
-      token,
+      `https://api.github.com/repos/${owner}/${repo}/branches/${branch}`
     );
     return true;
   } catch (error) {
@@ -130,9 +130,9 @@ export async function checkBranchExists(
   }
 }
 
-export async function checkUserExists(username: string, token?: string): Promise<boolean> {
+export async function checkUserExists(username: string): Promise<boolean> {
   try {
-    await githubRequest(`https://api.github.com/users/${username}`, {}, token);
+    await githubRequest(`https://api.github.com/users/${username}`);
     return true;
   } catch (error) {
     if (error && typeof error === "object" && "status" in error && error.status === 404) {
