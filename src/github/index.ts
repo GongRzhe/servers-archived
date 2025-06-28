@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
@@ -8,6 +10,11 @@ import {
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import fetch from 'node-fetch';
+import express from 'express';
+import { randomUUID } from 'node:crypto';
+import {
+  isInitializeRequest,
+} from "@modelcontextprotocol/sdk/types.js";
 
 import * as repository from './operations/repository.js';
 import * as files from './operations/files.js';
@@ -514,10 +521,200 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 });
 
+// HTTP/SSE server setup function
+async function startHttpServer(mcpServer: Server, transportMode: 'http' | 'sse') {
+  const app = express();
+  app.use(express.json());
+
+  console.log(`Starting GitHub MCP Server with ${transportMode.toUpperCase()} transport...`);
+
+  // Store transports for session management
+  const transports = {
+    streamable: {} as Record<string, StreamableHTTPServerTransport>,
+    sse: {} as Record<string, SSEServerTransport>
+  };
+
+  if (transportMode === 'http') {
+    // Modern Streamable HTTP endpoint
+    app.all('/mcp', async (req, res) => {
+      try {
+        // Set CORS headers
+        res.header('Access-Control-Allow-Origin', '*');
+        res.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+        res.header('Access-Control-Allow-Headers', 'Content-Type, mcp-session-id');
+
+        const sessionId = req.headers['mcp-session-id'] as string | undefined;
+        let transport: StreamableHTTPServerTransport;
+
+        if (sessionId && transports.streamable[sessionId]) {
+          // Reuse existing transport
+          transport = transports.streamable[sessionId];
+        } else if (!sessionId && req.method === 'POST' && isInitializeRequest(req.body)) {
+          // New initialization request
+          transport = new StreamableHTTPServerTransport({
+            sessionIdGenerator: () => randomUUID(),
+            onsessioninitialized: (sessionId: string) => {
+              transports.streamable[sessionId] = transport;
+              console.log(`New session initialized: ${sessionId}`);
+            }
+          });
+
+          // Clean up transport when closed
+          transport.onclose = () => {
+            if (transport.sessionId) {
+              delete transports.streamable[transport.sessionId];
+              console.log(`Session closed: ${transport.sessionId}`);
+            }
+          };
+
+          // Connect the server to the transport
+          await mcpServer.connect(transport);
+        } else if (req.method === 'POST') {
+          // POST request without session ID for non-initialize requests
+          res.status(400).json({
+            jsonrpc: '2.0',
+            error: {
+              code: -32000,
+              message: 'Bad Request: Session ID required for non-initialize requests',
+            },
+            id: req.body.id || null,
+          });
+          return;
+        } else {
+          // Other methods (GET/DELETE) require session ID
+          if (!sessionId || !transports.streamable[sessionId]) {
+            res.status(400).send('Invalid or missing session ID');
+            return;
+          }
+          transport = transports.streamable[sessionId];
+        }
+
+        // Handle the request through the proper MCP transport
+        await transport.handleRequest(req, res, req.body);
+
+      } catch (error: any) {
+        console.error('Error handling Streamable HTTP request:', error);
+        if (!res.headersSent) {
+          res.status(500).json({
+            jsonrpc: '2.0',
+            error: {
+              code: -32603,
+              message: 'Internal server error',
+            },
+            id: null,
+          });
+        }
+      }
+    });
+  }
+
+  if (transportMode === 'sse') {
+    // SSE endpoint
+    app.get('/sse', async (req, res) => {
+      try {
+        const transport = new SSEServerTransport('/messages', res);
+        transports.sse[transport.sessionId] = transport;
+
+        res.on("close", () => {
+          delete transports.sse[transport.sessionId];
+          console.log(`SSE session closed: ${transport.sessionId}`);
+        });
+
+        await mcpServer.connect(transport);
+        console.log(`SSE session started: ${transport.sessionId}`);
+      } catch (error) {
+        console.error('Error starting SSE transport:', error);
+        res.status(500).send('Failed to start SSE transport');
+      }
+    });
+
+    // Message endpoint for SSE clients
+    app.post('/messages', async (req, res) => {
+      try {
+        const sessionId = req.query.sessionId as string;
+        const transport = transports.sse[sessionId];
+        if (transport) {
+          await transport.handlePostMessage(req, res, req.body);
+        } else {
+          res.status(400).send('No transport found for sessionId');
+        }
+      } catch (error) {
+        console.error('Error handling SSE message:', error);
+        res.status(500).send('Error processing message');
+      }
+    });
+  }
+
+  // Handle CORS preflight for all endpoints
+  app.options('*', (req, res) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, mcp-session-id');
+    res.sendStatus(200);
+  });
+
+  // Health check endpoint
+  app.get('/health', (req, res) => {
+    res.json({
+      status: 'ok',
+      transport: transportMode,
+      timestamp: new Date().toISOString(),
+      version: VERSION,
+      activeSessions: {
+        streamable: Object.keys(transports.streamable).length,
+        sse: Object.keys(transports.sse).length
+      }
+    });
+  });
+
+  // API documentation endpoint
+  app.get('/', (req, res) => {
+    res.json({
+      name: 'GitHub MCP Server',
+      version: VERSION,
+      transport: transportMode,
+      protocol: transportMode === 'http' ? 'Streamable HTTP (2025-03-26)' : 'SSE (deprecated)',
+      endpoints: transportMode === 'http' ? {
+        mcp: 'ALL /mcp - MCP Streamable HTTP endpoint',
+        health: 'GET /health - Health check'
+      } : {
+        sse: 'GET /sse - SSE connection endpoint',
+        messages: 'POST /messages - Message handling endpoint',
+        health: 'GET /health - Health check'
+      },
+      documentation: 'https://modelcontextprotocol.io/docs'
+    });
+  });
+
+  const port = process.env.PORT || 3000;
+  app.listen(port, () => {
+    console.log(`GitHub MCP Server listening on port ${port}`);
+    console.log(`Transport mode: ${transportMode}`);
+    if (transportMode === 'http') {
+      console.log(`Streamable HTTP endpoint: http://localhost:${port}/mcp`);
+    } else {
+      console.log(`SSE endpoint: http://localhost:${port}/sse`);
+      console.log(`Messages endpoint: http://localhost:${port}/messages`);
+    }
+    console.log(`Health check: http://localhost:${port}/health`);
+    console.log(`Documentation: http://localhost:${port}/`);
+  });
+}
+
 async function runServer() {
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-  console.error("GitHub MCP Server running on stdio");
+  // Determine transport mode from command line arguments
+  const transportMode = process.argv.includes('--http') ? 'http' :
+    process.argv.includes('--sse') ? 'sse' : 'stdio';
+
+  if (transportMode === 'stdio') {
+    // Default stdio transport
+    const transport = new StdioServerTransport();
+    await server.connect(transport);
+    console.error("GitHub MCP Server running on stdio");
+  } else {
+    // HTTP or SSE transport - start Express server
+    await startHttpServer(server, transportMode as 'http' | 'sse');
+  }
 }
 
 runServer().catch((error) => {
