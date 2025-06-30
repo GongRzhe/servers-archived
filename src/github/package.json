@@ -1,6 +1,6 @@
 {
-  "name": "@modelcontextprotocol/server-github",
-  "version": "0.6.2",
+  "name": "@gongrzhe/server-github",
+  "version": "0.0.1",
   "description": "MCP server for using the GitHub API",
   "license": "MIT",
   "author": "Anthropic, PBC (https://anthropic.com)",
@@ -13,6 +13,9 @@
   "files": [
     "dist"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc && shx chmod +x dist/*.js",
     "prepare": "npm run build",
